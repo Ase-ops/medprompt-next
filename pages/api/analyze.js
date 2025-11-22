@@ -89,19 +89,16 @@ except Exception as e:
 `;
 
       // Execute Python script
-      let pythonResult;
+      const pythonResult = spawnSync("python3", ["-c", pythonScript, filePath], {
+        encoding: "utf-8",
+        timeout: 10000,
+      });
+
+      // Clean up uploaded file after Python has read it
       try {
-        pythonResult = spawnSync("python3", ["-c", pythonScript, filePath], {
-          encoding: "utf-8",
-          timeout: 10000,
-        });
-      } finally {
-        // Clean up uploaded file
-        try {
-          fs.unlinkSync(filePath);
-        } catch (cleanupErr) {
-          console.error("Failed to clean up temp file:", cleanupErr);
-        }
+        fs.unlinkSync(filePath);
+      } catch (cleanupErr) {
+        console.error("Failed to clean up temp file:", cleanupErr);
       }
 
       if (pythonResult.error) {

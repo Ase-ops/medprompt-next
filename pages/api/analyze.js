@@ -15,18 +15,21 @@ export default async function handler(req, res) {
 
   const form = new IncomingForm();
 
-  form.parse(req, (err, fields, files) => {
-    if (err) {
-      return res.status(500).json({ error: "Failed to parse form data" });
-    }
+  return new Promise((resolve) => {
+    form.parse(req, (err, fields, files) => {
+      if (err) {
+        res.status(500).json({ error: "Failed to parse form data" });
+        return resolve();
+      }
 
-    const dicomFile = files.dicom_file;
-    if (!dicomFile) {
-      return res.status(400).json({ error: "No DICOM file uploaded" });
-    }
+      const dicomFile = files.dicom_file;
+      if (!dicomFile) {
+        res.status(400).json({ error: "No DICOM file uploaded" });
+        return resolve();
+      }
 
-    // Get the file path (handle both array and single file cases)
-    const filePath = Array.isArray(dicomFile) ? dicomFile[0].filepath : dicomFile.filepath;
+      // Get the file path (handle both array and single file cases)
+      const filePath = Array.isArray(dicomFile) ? dicomFile[0].filepath : dicomFile.filepath;
 
     // Python script to extract DICOM metadata and generate PNG preview
     const pythonScript = `
@@ -85,60 +88,69 @@ except Exception as e:
     sys.exit(1)
 `;
 
-    // Execute Python script
-    const pythonResult = spawnSync("python3", ["-c", pythonScript, filePath], {
-      encoding: "utf-8",
-      timeout: 10000,
-    });
-
-    // Clean up uploaded file
-    try {
-      fs.unlinkSync(filePath);
-    } catch (cleanupErr) {
-      console.error("Failed to clean up temp file:", cleanupErr);
-    }
-
-    if (pythonResult.error) {
-      return res.status(500).json({
-        error: "Failed to execute Python script",
-        details: pythonResult.error.message,
-      });
-    }
-
-    if (pythonResult.status !== 0) {
-      return res.status(500).json({
-        error: "Python script failed",
-        stderr: pythonResult.stderr,
-        stdout: pythonResult.stdout,
-      });
-    }
-
-    try {
-      const result = JSON.parse(pythonResult.stdout);
-      
-      if (result.error) {
-        return res.status(500).json({
-          error: "DICOM processing error",
-          details: result.error,
+      // Execute Python script
+      let pythonResult;
+      try {
+        pythonResult = spawnSync("python3", ["-c", pythonScript, filePath], {
+          encoding: "utf-8",
+          timeout: 10000,
         });
+      } finally {
+        // Clean up uploaded file
+        try {
+          fs.unlinkSync(filePath);
+        } catch (cleanupErr) {
+          console.error("Failed to clean up temp file:", cleanupErr);
+        }
       }
 
-      // Return response in the format expected by the frontend
-      return res.status(200).json({
-        findings: `📊 DICOM Metadata:\n` +
-          `Patient: ${result.metadata.PatientName} (ID: ${result.metadata.PatientID})\n` +
-          `Study Date: ${result.metadata.StudyDate}\n` +
-          `Modality: ${result.metadata.Modality}\n` +
-          `Description: ${result.metadata.StudyDescription}`,
-        ai_confidence: "N/A",
-        image_preview_base64: result.image_preview_base64,
-      });
-    } catch (parseErr) {
-      return res.status(500).json({
-        error: "Failed to parse Python output",
-        details: parseErr.message,
-        stdout: pythonResult.stdout,
-      });
-    }
+      if (pythonResult.error) {
+        res.status(500).json({
+          error: "Failed to execute Python script",
+          details: pythonResult.error.message,
+        });
+        return resolve();
+      }
+
+      if (pythonResult.status !== 0) {
+        res.status(500).json({
+          error: "Python script failed",
+          stderr: pythonResult.stderr,
+          stdout: pythonResult.stdout,
+        });
+        return resolve();
+      }
+
+      try {
+        const result = JSON.parse(pythonResult.stdout);
+        
+        if (result.error) {
+          res.status(500).json({
+            error: "DICOM processing error",
+            details: result.error,
+          });
+          return resolve();
+        }
+
+        // Return response in the format expected by the frontend
+        res.status(200).json({
+          findings: `📊 DICOM Metadata:\n` +
+            `Patient: ${result.metadata.PatientName} (ID: ${result.metadata.PatientID})\n` +
+            `Study Date: ${result.metadata.StudyDate}\n` +
+            `Modality: ${result.metadata.Modality}\n` +
+            `Description: ${result.metadata.StudyDescription}`,
+          ai_confidence: "N/A",
+          image_preview_base64: result.image_preview_base64,
+        });
+        return resolve();
+      } catch (parseErr) {
+        res.status(500).json({
+          error: "Failed to parse Python output",
+          details: parseErr.message,
+          stdout: pythonResult.stdout,
+        });
+        return resolve();
+      }
+    });
   });
 }

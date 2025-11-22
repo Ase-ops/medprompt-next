@@ -64,7 +64,6 @@ if hasattr(ds, 'PixelData'):
     try:
         arr = ds.pixel_array
         if arr is not None:
-            from PIL import Image
             img = Image.fromarray(arr)
             buf = io.BytesIO()
             img.save(buf, format='PNG')

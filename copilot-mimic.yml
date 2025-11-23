@@ -1,0 +1,105 @@
+name: Copilot mimic
+
+on:
+  workflow_dispatch:
+
+jobs:
+  dicom-update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Replace analyze.js with DICOM logic
+        run: |
+          mkdir -p pages/api
+          cat > pages/api/analyze.js <<'EOF'
+// pages/api/analyze.js
+
+import { spawnSync } from 'child_process';
+import formidable from 'formidable';
+
+export const config = {
+  api: {
+    bodyParser: false,
+  },
+};
+
+function parseForm(req) {
+  return new Promise((resolve, reject) => {
+    const form = new formidable.IncomingForm({ multiples: false });
+    form.parse(req, (err, fields, files) => {
+      if (err) return reject(err);
+      resolve({ fields, files });
+    });
+  });
+}
+
+export default async function handler(req, res) {
+  if (req.method !== 'POST') {
+    res.setHeader('Allow', 'POST');
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  try {
+    const { files } = await parseForm(req);
+    const file = files.file || files.dicom || Object.values(files)[0];
+    if (!file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    const filePath = file.filepath || file.path || file.file;
+    if (!filePath) {
+      return res.status(400).json({ error: 'Uploaded file path not found' });
+    }
+
+    const py = `import sys, json, base64\\nfrom pydicom import dcmread\\nfrom PIL import Image\\nimport io\\nfn = sys.argv[1]\\ntry:\\n    ds = dcmread(fn)\\nexcept Exception as e:\\n    print(json.dumps({'__error__': 'dcmread_failed', 'message': str(e)}))\\n    sys.exit(0)\\n\\ndef _to_str(x):\\n    try:\\n        return str(x)\\n    except:\\n        return ''\\n\\npatient = _to_str(getattr(ds, 'PatientName', ''))\\nmodality = _to_str(getattr(ds, 'Modality', ''))\\nscan_date = _to_str(getattr(ds, 'StudyDate', getattr(ds, 'AcquisitionDate', '')))\\nresult = {'patient': patient, 'modality': modality, 'scan_date': scan_date}\\n\\nif hasattr(ds, 'PixelData'):\\n    try:\\n        arr = ds.pixel_array\\n        if arr is not None:\\n            from PIL import Image\\n            img = Image.fromarray(arr)\\n            buf = io.BytesIO()\\n            img.save(buf, format='PNG')\\n            b64 = base64.b64encode(buf.getvalue()).decode('ascii')\\n            result['image_base64'] = b64\\n    except Exception as e:\\n        result['image_error'] = str(e)\\n\\nprint(json.dumps(result))`;
+
+    const proc = spawnSync('python3', ['-c', py, filePath], { encoding: 'utf8', maxBuffer: 50 * 1024 * 1024 });
+
+    if (proc.error) {
+      return res.status(500).json({ error: 'Failed to run python subprocess', details: String(proc.error) });
+    }
+
+    const out = proc.stdout && proc.stdout.trim();
+    const err = proc.stderr && proc.stderr.trim();
+
+    if (!out) {
+      return res.status(500).json({ error: 'No output from python', stderr: err || null });
+    }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(out);
+    } catch (e) {
+      return res.status(500).json({ error: 'Invalid JSON from python', stdout: out, stderr: err });
+    }
+
+    if (parsed && parsed.__error__ === 'dcmread_failed') {
+      return res.status(400).json({ error: 'Failed to read DICOM', message: parsed.message });
+    }
+
+    const response = {
+      patient: parsed.patient || null,
+      modality: parsed.modality || null,
+      scan_date: parsed.scan_date || null,
+      image_base64: parsed.image_base64 || null,
+    };
+
+    return res.status(200).json(response);
+  } catch (err) {
+    console.error('analyze API error:', err);
+    return res.status(500).json({ error: 'Internal server error', details: String(err) });
+  }
+}
+EOF
+
+      - name: Commit changes and create PR
+        uses: peter-evans/create-pull-request@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: Add basic DICOM parsing to analyze API
+          title: Add basic DICOM parsing to analyze API
+          body: Enables real extraction of metadata and optional image preview from uploaded DICOM files.
+          base: main
+          branch: dicom-support

@@ -1,0 +1,6 @@
+streamlit
+pydicom
+Pillow
+torch
+monai
+transformers

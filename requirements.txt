@@ -1,0 +1,7 @@
+streamlit
+pydicom
+monai
+matplotlib
+numpy
+torch
+transformers

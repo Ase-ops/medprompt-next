@@ -1,7 +1,0 @@
-streamlit
-pydicom
-torch
-monai
-Pillow
-transformers
-numpy

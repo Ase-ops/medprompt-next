@@ -1,0 +1,6 @@
+streamlit
+pydicom
+monai
+torch
+Pillow
+numpy

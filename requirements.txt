@@ -1,6 +1,0 @@
-streamlit
-pydicom
-numpy
-monai
-Pillow
-requests

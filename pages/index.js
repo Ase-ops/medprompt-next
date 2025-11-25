@@ -1,5 +1,3 @@
-"use client";
-
 import { useState } from "react";
 
 export default function Home() {
@@ -16,18 +14,30 @@ export default function Home() {
     if (!file) return alert("⚠️ Upload a file first");
     setLoading(true);
 
-    const formData = new FormData();
-    formData.append("dicom_file", file);
-    formData.append("prompt", "Analyze this scan for abnormalities.");
+    try {
+      const formData = new FormData();
+      formData.append("dicom_file", file);
+      formData.append("prompt", "Analyze this scan for abnormalities.");
 
-    const res = await fetch("/api/analyze", {
-      method: "POST",
-      body: formData,
-    });
+      const res = await fetch("/api/analyze", {
+        method: "POST",
+        body: formData,
+      });
 
-    const data = await res.json();
-    setResult(data);
-    setLoading(false);
+      const data = await res.json();
+      
+      if (!res.ok || data.error) {
+        alert(`Error: ${data.error || "Failed to analyze file"}`);
+        setResult(null);
+      } else {
+        setResult(data);
+      }
+    } catch (error) {
+      alert(`Error: ${error.message}`);
+      setResult(null);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
